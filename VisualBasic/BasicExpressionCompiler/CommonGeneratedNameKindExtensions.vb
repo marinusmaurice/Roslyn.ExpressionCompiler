@@ -23,7 +23,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 Case CommonGeneratedNameKind.StateMachineStateField
                     Return GeneratedNameKind.StateMachineStateField
                 Case CommonGeneratedNameKind.StateMachineHoistedUserVariableField
-                    Return GeneratedNameKind.StateMachineHoistedUserVariableField
+                    Return GeneratedNameKind.StateMachineHoistedUserVariableOrDisplayClassField
                 Case CommonGeneratedNameKind.StaticLocalField
                     Return GeneratedNameKind.StaticLocalField
                 Case CommonGeneratedNameKind.TransparentIdentifier

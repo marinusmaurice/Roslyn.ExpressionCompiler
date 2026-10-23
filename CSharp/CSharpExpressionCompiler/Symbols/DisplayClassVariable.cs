@@ -1,11 +1,15 @@
-﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for more information.
 
+#nullable disable
+
+using System.Collections.Immutable;
+using System.Diagnostics;
 using Microsoft.CodeAnalysis.CSharp.Symbols;
 using Microsoft.CodeAnalysis.ExpressionEvaluator;
 using Microsoft.CodeAnalysis.PooledObjects;
 using Roslyn.Utilities;
-using System.Collections.Immutable;
-using System.Diagnostics;
 
 namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
 {
@@ -100,19 +104,18 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         {
             Debug.Assert(!field.IsStatic);
             Debug.Assert(!field.IsReadOnly || compiler.GetKind(field.Name) == GeneratedNameKind.AnonymousTypeField);
-            Debug.Assert(field.CustomModifiers.Length == 0);
             // CONSIDER: Instead of digging fields out of the unsubstituted type and then performing substitution
             // on each one individually, we could dig fields out of the substituted type.
-            return new EEDisplayClassFieldSymbol(typeMap.SubstituteNamedType(field.ContainingType), field.Name, typeMap.SubstituteType(field.Type).Type);
+            return new EEDisplayClassFieldSymbol(typeMap.SubstituteNamedType(field.ContainingType), field.Name, typeMap.SubstituteType(field.TypeWithAnnotations));
         }
 
         private sealed class EEDisplayClassFieldSymbol : FieldSymbol
         {
             private readonly NamedTypeSymbol _container;
             private readonly string _name;
-            private readonly TypeSymbol _type;
+            private readonly TypeWithAnnotations _type;
 
-            internal EEDisplayClassFieldSymbol(NamedTypeSymbol container, string name, TypeSymbol type)
+            internal EEDisplayClassFieldSymbol(NamedTypeSymbol container, string name, TypeWithAnnotations type)
             {
                 _container = container;
                 _name = name;
@@ -121,7 +124,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
 
             public override Symbol AssociatedSymbol
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             public override Symbol ContainingSymbol
@@ -129,19 +132,14 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 get { return _container; }
             }
 
-            public override ImmutableArray<CustomModifier> CustomModifiers
-            {
-                get { return ImmutableArray<CustomModifier>.Empty; }
-            }
-
             public override Accessibility DeclaredAccessibility
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             public override ImmutableArray<SyntaxReference> DeclaringSyntaxReferences
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             public override bool IsConst
@@ -164,9 +162,16 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 get { return false; }
             }
 
+            internal override bool IsRequired => throw ExceptionUtilities.Unreachable();
+
+            public override FlowAnalysisAnnotations FlowAnalysisAnnotations
+            {
+                get { return FlowAnalysisAnnotations.None; }
+            }
+
             public override ImmutableArray<Location> Locations
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             public override string Name
@@ -176,43 +181,49 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
 
             internal override bool HasRuntimeSpecialName
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             internal override bool HasSpecialName
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             internal override bool IsNotSerialized
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             internal override MarshalPseudoCustomAttributeData MarshallingInformation
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             internal override ObsoleteAttributeData ObsoleteAttributeData
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             internal override int? TypeLayoutOffset
             {
-                get { throw ExceptionUtilities.Unreachable; }
+                get { throw ExceptionUtilities.Unreachable(); }
             }
 
             internal override ConstantValue GetConstantValue(ConstantFieldsInProgress inProgress, bool earlyDecodingWellKnownAttributes)
             {
-                throw ExceptionUtilities.Unreachable;
+                throw ExceptionUtilities.Unreachable();
             }
 
-            internal override TypeSymbol GetFieldType(ConsList<FieldSymbol> fieldsBeingBound)
+            internal override TypeWithAnnotations GetFieldType(ConsList<FieldSymbol> fieldsBeingBound)
             {
                 return _type;
             }
+
+            public override RefKind RefKind => RefKind.None;
+
+            public override ImmutableArray<CustomModifier> RefCustomModifiers => ImmutableArray<CustomModifier>.Empty;
+
+            internal override CallerUnsafeMode GetCallerUnsafeMode(ConsList<FieldSymbol> fieldsBeingBound) => CallerUnsafeMode.None;
         }
     }
 }

@@ -1,4 +1,6 @@
-﻿' Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿' Licensed to the .NET Foundation under one or more agreements.
+' The .NET Foundation licenses this file to you under the MIT license.
+' See the LICENSE file in the project root for more information.
 
 Imports System.Collections.Immutable
 Imports System.Collections.ObjectModel
@@ -18,7 +20,6 @@ Imports Microsoft.CodeAnalysis.PooledObjects
 Imports Microsoft.CodeAnalysis.VisualBasic.Symbols
 Imports Microsoft.CodeAnalysis.VisualBasic.Symbols.Metadata.PE
 Imports Microsoft.CodeAnalysis.VisualBasic.Syntax
-Imports Microsoft.VisualStudio.Debugger.Clr
 Imports Microsoft.VisualStudio.Debugger.Evaluation
 Imports Microsoft.VisualStudio.Debugger.Evaluation.ClrCompilation
 Imports Roslyn.Utilities
@@ -101,7 +102,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
         ''' Create a context for evaluating expressions at a type scope.
         ''' </summary>
         ''' <param name="compilation">Compilation.</param>
-        ''' <param name="moduleVersionId">Module containing type.</param>
+        ''' <param name="moduleId">Module containing type.</param>
         ''' <param name="typeToken">Type metadata token.</param>
         ''' <returns>Evaluation context.</returns>
         ''' <remarks>
@@ -109,12 +110,12 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
         ''' </remarks>
         Friend Shared Function CreateTypeContext(
             compilation As VisualBasicCompilation,
-            moduleVersionId As Guid,
+            moduleId As ModuleId,
             typeToken As Integer) As EvaluationContext
 
             Debug.Assert(MetadataTokens.Handle(typeToken).Kind = HandleKind.TypeDefinition)
 
-            Dim currentType = compilation.GetType(moduleVersionId, typeToken)
+            Dim currentType = compilation.GetType(moduleId, typeToken)
             Debug.Assert(currentType IsNot Nothing)
 
             Dim currentFrame = New SynthesizedContextMethodSymbol(currentType)
@@ -128,13 +129,20 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 methodDebugInfo:=MethodDebugInfo(Of TypeSymbol, LocalSymbol).None)
         End Function
 
+        Friend Shared Function CreateTypeContext(
+            compilation As VisualBasicCompilation,
+            moduleVersionId As Guid,
+            typeToken As Integer) As EvaluationContext
+            Return CreateTypeContext(compilation, New ModuleId(moduleVersionId, "<unknown>"), typeToken)
+        End Function
+
         ''' <summary>
         ''' Create a context for evaluating expressions within a method scope.
         ''' </summary>
         ''' <param name="previous">Previous context, if any, for possible re-use.</param>
         ''' <param name="metadataBlocks">Module metadata.</param>
-        ''' <param name="getMethodDebugInfo"></param>
-        ''' <param name="moduleVersionId">Module containing method.</param>
+        ''' <param name="getMethodDebugInfo">Returns the method's debug info (created by dnSpy, not read from a PDB file)</param>
+        ''' <param name="moduleId">Module containing method.</param>
         ''' <param name="methodToken">Method metadata token.</param>
         ''' <param name="methodVersion">Method version.</param>
         ''' <param name="ilOffset">IL offset of instruction pointer in method.</param>
@@ -159,7 +167,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 compilation,
                 lazyAssemblyReaders,
                 getMethodDebugInfo,
-                moduleVersionId,
+                New ModuleId(moduleVersionId, "<unknown>"),
                 methodToken,
                 methodVersion,
                 offset,
@@ -170,7 +178,8 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
         ''' Create a context for evaluating expressions within a method scope.
         ''' </summary>
         ''' <param name="compilation">Compilation.</param>
-        ''' <param name="moduleVersionId">Module containing method.</param>
+        ''' <param name="getMethodDebugInfo">Returns the method's debug info (created by dnSpy, not read from a PDB file)</param>
+        ''' <param name="moduleId">Module containing method.</param>
         ''' <param name="methodToken">Method metadata token.</param>
         ''' <param name="methodVersion">Method version.</param>
         ''' <param name="ilOffset">IL offset of instruction pointer in method.</param>
@@ -180,19 +189,20 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             compilation As VisualBasicCompilation,
             lazyAssemblyReaders As Lazy(Of ImmutableArray(Of AssemblyReaders)),
             getMethodDebugInfo As GetMethodDebugInfo,
-            moduleVersionId As Guid,
+            moduleId As ModuleId,
             methodToken As Integer,
             methodVersion As Integer,
             ilOffset As Integer,
             localSignatureToken As Integer) As EvaluationContext
 
             Dim methodHandle = CType(MetadataTokens.Handle(methodToken), MethodDefinitionHandle)
+            ' Ignore invalid tokens (eg. obfuscated methods)
             If (localSignatureToken >> 24) <> &H11 Then
                 localSignatureToken = 0
             End If
             Dim localSignatureHandle = If(localSignatureToken <> 0, CType(MetadataTokens.Handle(localSignatureToken), StandaloneSignatureHandle), Nothing)
 
-            Dim currentFrame = compilation.GetMethod(moduleVersionId, methodHandle)
+            Dim currentFrame = compilation.GetMethod(moduleId, methodHandle)
             Debug.Assert(currentFrame IsNot Nothing)
             Dim symbolProvider = New VisualBasicEESymbolProvider(DirectCast(currentFrame.ContainingModule, PEModuleSymbol), currentFrame)
 
@@ -201,16 +211,9 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
 
             Dim debugInfo As MethodDebugInfo(Of TypeSymbol, LocalSymbol)
 
-#If 0 Then
-            If IsDteeEntryPoint(currentFrame) Then
-                debugInfo = SynthesizeMethodDebugInfoForDtee(lazyAssemblyReaders.Value)
-            Else
-#End If
+            ' dnSpy creates the debug info (DTEE entry points aren't supported)
             debugInfo = getMethodDebugInfo().ToMethodDebugInfo(symbolProvider)
-#If 0 Then
-            End If
-#End If
-            Dim currentSourceMethod = compilation.GetSourceMethod(debugInfo.Compiler, moduleVersionId, methodHandle)
+            Dim currentSourceMethod = compilation.GetSourceMethod(debugInfo.Compiler, moduleId, methodHandle)
 
             Dim reuseSpan = debugInfo.ReuseSpan
 
@@ -222,7 +225,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             End If
 
             Dim localNames = debugInfo.LocalVariableNames.WhereAsArray(
-                Function(name) name Is Nothing OrElse debugInfo.Compiler.GetKind(name) <> GeneratedNameKind.StateMachineHoistedUserVariableField)
+                Function(name) name Is Nothing OrElse debugInfo.Compiler.GetKind(name) <> GeneratedNameKind.StateMachineHoistedUserVariableOrDisplayClassField)
 
             Dim localsBuilder = ArrayBuilder(Of LocalSymbol).GetInstance()
             MethodDebugInfo(Of TypeSymbol, LocalSymbol).GetLocals(localsBuilder, symbolProvider, localNames, localInfo, Nothing, debugInfo.TupleLocalMap)
@@ -231,7 +234,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             localsBuilder.AddRange(debugInfo.LocalConstants)
 
             Return New EvaluationContext(
-                New MethodContextReuseConstraints(moduleVersionId, methodToken, methodVersion, reuseSpan),
+                New MethodContextReuseConstraints(moduleId, methodToken, methodVersion, reuseSpan),
                 compilation,
                 currentFrame,
                 currentSourceMethod,
@@ -304,13 +307,14 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 Try
                     For Each typeDefHandle In metadataReader.TypeDefinitions
                         Dim typeDef = metadataReader.GetTypeDefinition(typeDefHandle)
+                        Dim foundAttributeType = False
 
                         ' VB does ignores the StandardModuleAttribute on interfaces and nested
                         ' or generic types (see PENamedTypeSymbol.TypeKind).
                         If Not PEModule.IsNested(typeDef.Attributes) AndAlso
                             typeDef.GetGenericParameters().Count = 0 AndAlso
                             (typeDef.Attributes And TypeAttributes.[Interface]) = 0 AndAlso
-                            PEModule.FindTargetAttribute(metadataReader, typeDefHandle, AttributeDescription.StandardModuleAttribute).HasValue Then
+                            PEModule.FindTargetAttribute(metadataReader, typeDefHandle, AttributeDescription.StandardModuleAttribute, foundAttributeType).HasValue Then
 
                             Dim namespaceName = metadataReader.GetString(typeDef.Namespace)
                             [imports].Add(namespaceName)
@@ -367,7 +371,9 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 tupleLocalMap:=Nothing,
                 localVariableNames:=ImmutableArray(Of String).Empty,
                 localConstants:=ImmutableArray(Of LocalSymbol).Empty,
-                reuseSpan:=Nothing)
+                reuseSpan:=Nothing,
+                containingDocumentName:=Nothing,
+                isPrimaryConstructor:=False)
         End Function
 #End If
 
@@ -724,13 +730,6 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
         Private Shared Function IsValidMissingAssemblyIdentity(identity As AssemblyIdentity) As Boolean
             Return identity IsNot Nothing AndAlso Not identity.Equals(MissingCorLibrarySymbol.Instance.Identity)
         End Function
-
-        Private Shared Function GetSynthesizedMethod(moduleBuilder As CommonPEModuleBuilder) As MethodSymbol
-            Dim method = DirectCast(moduleBuilder, EEAssemblyBuilder).Methods.Single(Function(m) m.MetadataName = s_methodName)
-            Debug.Assert(method.ContainingType.MetadataName = s_typeName)
-            Return method
-        End Function
-
     End Class
 
 End Namespace

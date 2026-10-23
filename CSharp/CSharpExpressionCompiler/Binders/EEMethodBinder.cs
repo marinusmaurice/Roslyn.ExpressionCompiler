@@ -1,7 +1,10 @@
-﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for more information.
+
+#nullable disable
 
 using System;
-using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using Microsoft.CodeAnalysis.CSharp.Symbols;
@@ -18,8 +21,10 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         private readonly ImmutableArray<ParameterSymbol> _targetParameters;
         private readonly Binder _sourceBinder;
 
-        internal EEMethodBinder(CompilerKind compiler, EEMethodSymbol method, MethodSymbol containingMethod, Binder next) : base(next)
+        internal EEMethodBinder(CompilerKind compiler, EEMethodSymbol method, MethodSymbol containingMethod, Binder next) : base(next, next.Flags | BinderFlags.InEEMethodBinder)
         {
+            Debug.Assert(method.DeclaringCompilation is not null);
+
             // There are a lot of method symbols floating around and we're doing some subtle things with them.
             //   1) method is the EEMethodSymbol that we're going to synthesize and hand to the debugger to evaluate.
             //   2) containingMethod is the method that we are conceptually in, e.g. the method containing the
@@ -41,12 +46,14 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             var substitutedSourceMethod = method.SubstitutedSourceMethod;
             _parameterOffset = substitutedSourceMethod.IsStatic ? 0 : 1;
             _targetParameters = method.Parameters;
-            _sourceBinder = new InMethodBinder(substitutedSourceMethod, new BuckStopsHereBinder(next.Compilation));
+
+            // Note that we never expect this InMethodBinder to find candidate symbols which may be file-local, and therefore pass 'associatedFileIdentifier: null' to the BuckStopsHereBinder.
+            _sourceBinder = new InMethodBinder(substitutedSourceMethod, new BuckStopsHereBinder(next.Compilation, associatedFileIdentifier: null).WithAdditionalFlags(BinderFlags.InEEMethodBinder));
         }
 
-        internal override void LookupSymbolsInSingleBinder(LookupResult result, string name, int arity, ConsList<Symbol> basesBeingResolved, LookupOptions options, Binder originalBinder, bool diagnose, ref HashSet<DiagnosticInfo> useSiteDiagnostics)
+        internal override void LookupSymbolsInSingleBinder(LookupResult result, string name, int arity, ConsList<TypeSymbol> basesBeingResolved, LookupOptions options, Binder originalBinder, bool diagnose, ref CompoundUseSiteInfo<AssemblySymbol> useSiteInfo)
         {
-            _sourceBinder.LookupSymbolsInSingleBinder(result, name, arity, basesBeingResolved, options, this, diagnose, ref useSiteDiagnostics);
+            _sourceBinder.LookupSymbolsInSingleBinder(result, name, arity, basesBeingResolved, options, this, diagnose, ref useSiteInfo);
 
             var symbols = result.Symbols;
             for (int i = 0; i < symbols.Count; i++)
@@ -60,7 +67,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             }
         }
 
-        protected override void AddLookupSymbolsInfoInSingleBinder(LookupSymbolsInfo info, LookupOptions options, Binder originalBinder)
+        internal override void AddLookupSymbolsInfoInSingleBinder(LookupSymbolsInfo info, LookupOptions options, Binder originalBinder)
         {
             throw new NotImplementedException();
         }

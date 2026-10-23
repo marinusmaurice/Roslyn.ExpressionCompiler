@@ -1,13 +1,14 @@
-﻿' Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿' Licensed to the .NET Foundation under one or more agreements.
+' The .NET Foundation licenses this file to you under the MIT license.
+' See the LICENSE file in the project root for more information.
 
 Imports System.Collections.Immutable
 Imports Microsoft.CodeAnalysis.ExpressionEvaluator
 Imports Microsoft.CodeAnalysis.VisualBasic.Symbols
-Imports Roslyn.Utilities
 
 Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
     Friend NotInheritable Class EETypeParameterSymbol
-        Inherits TypeParameterSymbol
+        Inherits SubstitutableTypeParameterSymbol
 
         Private ReadOnly _compiler As CompilerKind
         Private ReadOnly _container As Symbol
@@ -66,6 +67,12 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             End Get
         End Property
 
+        Public Overrides ReadOnly Property AllowsRefLikeType As Boolean
+            Get
+                Return _sourceTypeParameterSymbol.AllowsRefLikeType
+            End Get
+        End Property
+
         Public Overrides ReadOnly Property Locations As ImmutableArray(Of Location)
             Get
                 Throw ExceptionUtilities.Unreachable
@@ -112,6 +119,12 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 Dim substitution = _getTypeParameterMap()
                 Debug.Assert(substitution IsNot Nothing, "Expected substitution to have been populated.")
                 Return InternalSubstituteTypeParametersDistinct(substitution, constraintTypes)
+            End Get
+        End Property
+
+        Friend Overrides ReadOnly Property HasUnmanagedTypeConstraint As Boolean
+            Get
+                Return _sourceTypeParameterSymbol.HasUnmanagedTypeConstraint
             End Get
         End Property
     End Class
