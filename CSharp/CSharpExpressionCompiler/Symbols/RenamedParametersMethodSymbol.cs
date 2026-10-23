@@ -52,6 +52,8 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         public override MethodSymbol UnderlyingMethod => _originalMethod;
         public override ImmutableArray<ParameterSymbol> Parameters => _parameters;
         public override Symbol ContainingSymbol => _originalMethod.ContainingSymbol;
+        // The original method is an EECompilationContextMethod; locals declared in the expression (eg. pattern variables) need its compilation
+        internal override CSharpCompilation DeclaringCompilation => _originalMethod.DeclaringCompilation;
         public override ImmutableArray<TypeParameterSymbol> TypeParameters => _originalMethod.TypeParameters;
         public override ImmutableArray<TypeWithAnnotations> TypeArgumentsWithAnnotations => _originalMethod.TypeArgumentsWithAnnotations;
         public override TypeWithAnnotations ReturnTypeWithAnnotations => _originalMethod.ReturnTypeWithAnnotations;
