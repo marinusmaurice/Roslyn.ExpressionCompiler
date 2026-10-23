@@ -8,6 +8,9 @@
     <AssemblyOriginatorKeyFile>..\..\..\..\..\dnSpy.snk</AssemblyOriginatorKeyFile>
     <MakeEverythingPublicAssemblies>Microsoft.CodeAnalysis;Microsoft.CodeAnalysis.CSharp</MakeEverythingPublicAssemblies>
     <MakeEverythingPublicIVTString>$(AssemblyName)</MakeEverythingPublicIVTString>
+    <!-- Never define DEBUG: the Roslyn sources use #if DEBUG for code that only compiles against
+         Roslyn's own Debug build (e.g. MethodSymbolAdapter), but we reference the Release NuGet packages -->
+    <DisableImplicitConfigurationDefines>true</DisableImplicitConfigurationDefines>
   </PropertyGroup>
 
   <Import Project="$(MSBuildProjectDirectory)\..\..\..\..\..\Build\MakeEverythingPublic\MakeEverythingPublic.tasks" />
