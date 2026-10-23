@@ -1,4 +1,6 @@
-﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Collections.Immutable;
@@ -14,7 +16,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
     {
         private static readonly DkmCompilerId s_compilerId = new DkmCompilerId(DkmVendorId.Microsoft, DkmLanguageId.CSharp);
 
-        public CSharpExpressionCompiler(): base(new CSharpFrameDecoder(), new CSharpLanguageInstructionDecoder())
+        public CSharpExpressionCompiler() : base(new CSharpFrameDecoder(), new CSharpLanguageInstructionDecoder())
         {
         }
 
@@ -31,10 +33,11 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         internal delegate MetadataContext<CSharpMetadataContext> GetMetadataContextDelegate<TAppDomain>(TAppDomain appDomain);
         internal delegate void SetMetadataContextDelegate<TAppDomain>(TAppDomain appDomain, MetadataContext<CSharpMetadataContext> metadataContext, bool report);
 
+        /// <exception cref="BadMetadataModuleException">Module wasn't included in the compilation due to bad metadata.</exception>
         internal override EvaluationContextBase CreateTypeContext(
             DkmClrAppDomain appDomain,
             ImmutableArray<MetadataBlock> metadataBlocks,
-            Guid moduleVersionId,
+            ModuleId moduleId,
             int typeToken,
             bool useReferencedModulesOnly)
         {
@@ -42,33 +45,34 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 appDomain,
                 ad => ad.GetMetadataContext<CSharpMetadataContext>(),
                 metadataBlocks,
-                moduleVersionId,
+                moduleId,
                 typeToken,
                 GetMakeAssemblyReferencesKind(useReferencedModulesOnly));
         }
 
+        /// <exception cref="BadMetadataModuleException">Module wasn't included in the compilation due to bad metadata.</exception>
         internal static EvaluationContext CreateTypeContext<TAppDomain>(
             TAppDomain appDomain,
             GetMetadataContextDelegate<TAppDomain> getMetadataContext,
             ImmutableArray<MetadataBlock> metadataBlocks,
-            Guid moduleVersionId,
+            ModuleId moduleId,
             int typeToken,
             MakeAssemblyReferencesKind kind)
         {
-            CSharpCompilation compilation;
+            CSharpCompilation? compilation;
 
             if (kind == MakeAssemblyReferencesKind.DirectReferencesOnly)
             {
                 // Avoid using the cache for referenced assemblies only
                 // since this should be the exceptional case.
-                compilation = metadataBlocks.ToCompilationReferencedModulesOnly(moduleVersionId);
+                compilation = metadataBlocks.ToCompilationReferencedModulesOnly(moduleId);
                 return EvaluationContext.CreateTypeContext(
                     compilation,
-                    moduleVersionId,
+                    moduleId,
                     typeToken);
             }
 
-            var contextId = MetadataContextId.GetContextId(moduleVersionId, kind);
+            var contextId = MetadataContextId.GetContextId(moduleId, kind);
             var previous = getMetadataContext(appDomain);
             CSharpMetadataContext previousMetadataContext = default;
             if (previous.Matches(metadataBlocks))
@@ -78,14 +82,11 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
 
             // Re-use the previous compilation if possible.
             compilation = previousMetadataContext.Compilation;
-            if (compilation == null)
-            {
-                compilation = metadataBlocks.ToCompilation(moduleVersionId, kind);
-            }
+            compilation ??= metadataBlocks.ToCompilation(moduleId, kind);
 
             var context = EvaluationContext.CreateTypeContext(
                 compilation,
-                moduleVersionId,
+                moduleId,
                 typeToken);
 
             // New type context is not attached to the AppDomain since it is less
@@ -101,8 +102,8 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             DkmClrAppDomain appDomain,
             ImmutableArray<MetadataBlock> metadataBlocks,
             Lazy<ImmutableArray<AssemblyReaders>> unusedLazyAssemblyReaders,
-            object symReader,
-            Guid moduleVersionId,
+            object? symReader,
+            ModuleId moduleId,
             int methodToken,
             int methodVersion,
             uint ilOffset,
@@ -115,7 +116,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 (ad, mc, report) => ad.SetMetadataContext<CSharpMetadataContext>(mc, report),
                 metadataBlocks,
                 symReader,
-                moduleVersionId,
+                moduleId,
                 methodToken,
                 methodVersion,
                 ilOffset,
@@ -128,8 +129,8 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             GetMetadataContextDelegate<TAppDomain> getMetadataContext,
             SetMetadataContextDelegate<TAppDomain> setMetadataContext,
             ImmutableArray<MetadataBlock> metadataBlocks,
-            object symReader,
-            Guid moduleVersionId,
+            object? symReader,
+            ModuleId moduleId,
             int methodToken,
             int methodVersion,
             uint ilOffset,
@@ -143,18 +144,18 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             {
                 // Avoid using the cache for referenced assemblies only
                 // since this should be the exceptional case.
-                compilation = metadataBlocks.ToCompilationReferencedModulesOnly(moduleVersionId);
+                compilation = metadataBlocks.ToCompilationReferencedModulesOnly(moduleId);
                 return EvaluationContext.CreateMethodContext(
                     compilation,
                     symReader,
-                    moduleVersionId,
+                    moduleId,
                     methodToken,
                     methodVersion,
                     offset,
                     localSignatureToken);
             }
 
-            var contextId = MetadataContextId.GetContextId(moduleVersionId, kind);
+            var contextId = MetadataContextId.GetContextId(moduleId, kind);
             var previous = getMetadataContext(appDomain);
             var assemblyContexts = previous.Matches(metadataBlocks) ? previous.AssemblyContexts : ImmutableDictionary<MetadataContextId, CSharpMetadataContext>.Empty;
             CSharpMetadataContext previousMetadataContext;
@@ -168,20 +169,20 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 var previousContext = previousMetadataContext.EvaluationContext;
                 if (previousContext != null &&
                     previousContext.MethodContextReuseConstraints.HasValue &&
-                    previousContext.MethodContextReuseConstraints.GetValueOrDefault().AreSatisfied(moduleVersionId, methodToken, methodVersion, offset))
+                    previousContext.MethodContextReuseConstraints.GetValueOrDefault().AreSatisfied(moduleId, methodToken, methodVersion, offset))
                 {
                     return previousContext;
                 }
             }
             else
             {
-                compilation = metadataBlocks.ToCompilation(moduleVersionId, kind);
+                compilation = metadataBlocks.ToCompilation(moduleId, kind);
             }
 
             var context = EvaluationContext.CreateMethodContext(
                 compilation,
                 symReader,
-                moduleVersionId,
+                moduleId,
                 methodToken,
                 methodVersion,
                 offset,

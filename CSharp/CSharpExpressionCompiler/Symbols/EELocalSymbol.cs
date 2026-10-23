@@ -1,23 +1,24 @@
-﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for more information.
 
-using System;
+#nullable disable
+
 using System.Collections.Immutable;
 using System.Diagnostics;
 using Microsoft.CodeAnalysis.CSharp.Symbols;
-using Roslyn.Utilities;
 
 namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
 {
     internal sealed class EELocalSymbol : EELocalSymbolBase
     {
         private readonly MethodSymbol _method;
-        private readonly TypeSymbol _type;
+        private readonly TypeWithAnnotations _type;
 
         private readonly LocalDeclarationKind _declarationKind;
         private readonly bool _isCompilerGenerated;
         private readonly ImmutableArray<Location> _locations;
         private readonly string _nameOpt;
-        private readonly int _ordinal; // index in locals of containing block
         private readonly bool _isPinned;
         private readonly RefKind _refKind;
         private readonly bool _canScheduleToStack;
@@ -33,16 +34,31 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             bool isPinned,
             bool isCompilerGenerated,
             bool canScheduleToStack)
+            : this(method, locations, nameOpt, ordinal, declarationKind, TypeWithAnnotations.Create(type), refKind, isPinned, isCompilerGenerated, canScheduleToStack)
+        {
+        }
+
+        public EELocalSymbol(
+            MethodSymbol method,
+            ImmutableArray<Location> locations,
+            string nameOpt,
+            int ordinal,
+            LocalDeclarationKind declarationKind,
+            TypeWithAnnotations type,
+            RefKind refKind,
+            bool isPinned,
+            bool isCompilerGenerated,
+            bool canScheduleToStack)
         {
             Debug.Assert(method != null);
             Debug.Assert(ordinal >= -1);
             Debug.Assert(!locations.IsDefault);
-            Debug.Assert(type != null);
+            Debug.Assert((object)type != null);
 
             _method = method;
             _locations = locations;
             _nameOpt = nameOpt;
-            _ordinal = ordinal;
+            Ordinal = ordinal;
             _declarationKind = declarationKind;
             _type = type;
             _refKind = refKind;
@@ -54,7 +70,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         internal override EELocalSymbolBase ToOtherMethod(MethodSymbol method, TypeMap typeMap)
         {
             var type = typeMap.SubstituteType(_type);
-            return new EELocalSymbol(method, _locations, _nameOpt, _ordinal, _declarationKind, type.Type, _refKind, _isPinned, _isCompilerGenerated, _canScheduleToStack);
+            return new EELocalSymbol(method, _locations, _nameOpt, Ordinal, _declarationKind, type, _refKind, _isPinned, _isCompilerGenerated, _canScheduleToStack);
         }
 
         internal override LocalDeclarationKind DeclarationKind
@@ -67,10 +83,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             get { return _canScheduleToStack; }
         }
 
-        internal int Ordinal
-        {
-            get { return _ordinal; }
-        }
+        internal int Ordinal { get; }
 
         public override string Name
         {
@@ -79,7 +92,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
 
         internal override SyntaxToken IdentifierToken
         {
-            get { throw ExceptionUtilities.Unreachable; }
+            get { throw ExceptionUtilities.Unreachable(); }
         }
 
         public override ImmutableArray<SyntaxReference> DeclaringSyntaxReferences
@@ -97,7 +110,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             get { return _method; }
         }
 
-        public override TypeSymbol Type
+        public override TypeWithAnnotations TypeWithAnnotations
         {
             get { return _type; }
         }
@@ -105,6 +118,11 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         internal override bool IsPinned
         {
             get { return _isPinned; }
+        }
+
+        internal override bool IsKnownToReferToTempIfReferenceType
+        {
+            get { return false; }
         }
 
         internal override bool IsCompilerGenerated

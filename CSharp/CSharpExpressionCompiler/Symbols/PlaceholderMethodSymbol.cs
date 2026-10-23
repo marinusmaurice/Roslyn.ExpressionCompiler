@@ -1,6 +1,9 @@
-﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for more information.
 
-using System;
+#nullable disable
+
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
@@ -12,7 +15,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
     /// <summary>
     /// Represents an intrinsic debugger method with byref return type.
     /// </summary>
-    internal sealed class PlaceholderMethodSymbol : MethodSymbol, Cci.ISignature
+    internal sealed partial class PlaceholderMethodSymbol : MethodSymbol
     {
         internal delegate ImmutableArray<TypeParameterSymbol> GetTypeParameters(PlaceholderMethodSymbol method);
         internal delegate ImmutableArray<ParameterSymbol> GetParameters(PlaceholderMethodSymbol method);
@@ -21,7 +24,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         private readonly NamedTypeSymbol _container;
         private readonly string _name;
         private readonly ImmutableArray<TypeParameterSymbol> _typeParameters;
-        private readonly TypeSymbol _returnType;
+        private readonly TypeWithAnnotations _returnType;
         private readonly ImmutableArray<ParameterSymbol> _parameters;
 
         internal PlaceholderMethodSymbol(
@@ -34,7 +37,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             _container = container;
             _name = name;
             _typeParameters = getTypeParameters(this);
-            _returnType = getReturnType(this);
+            _returnType = TypeWithAnnotations.Create(getReturnType(this));
             _parameters = getParameters(this);
         }
 
@@ -60,7 +63,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
 
         public override ImmutableArray<SyntaxReference> DeclaringSyntaxReferences
         {
-            get { throw ExceptionUtilities.Unreachable; }
+            get { throw ExceptionUtilities.Unreachable(); }
         }
 
         public override ImmutableArray<MethodSymbol> ExplicitInterfaceImplementations
@@ -118,6 +121,10 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             get { return false; }
         }
 
+        internal override bool IsDeclaredReadOnly => false;
+
+        internal override bool IsInitOnly => false;
+
         public override ImmutableArray<Location> Locations
         {
             get { return ImmutableArray<Location>.Empty; }
@@ -148,29 +155,25 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             get { return RefKind.None; }
         }
 
-        public override TypeSymbol ReturnType
+        public override TypeWithAnnotations ReturnTypeWithAnnotations
         {
             get { return _returnType; }
         }
 
-        bool Cci.ISignature.ReturnValueIsByRef
-        {
-            get { return true; }
-        }
+        public override FlowAnalysisAnnotations ReturnTypeFlowAnalysisAnnotations => FlowAnalysisAnnotations.None;
 
-        public override ImmutableArray<CustomModifier> ReturnTypeCustomModifiers
-        {
-            get { return ImmutableArray<CustomModifier>.Empty; }
-        }
+        public override ImmutableHashSet<string> ReturnNotNullIfParameterNotNull => ImmutableHashSet<string>.Empty;
+
+        public override FlowAnalysisAnnotations FlowAnalysisAnnotations => FlowAnalysisAnnotations.None;
 
         public override ImmutableArray<CustomModifier> RefCustomModifiers
         {
             get { return ImmutableArray<CustomModifier>.Empty; }
         }
 
-        public override ImmutableArray<TypeSymbol> TypeArguments
+        public override ImmutableArray<TypeWithAnnotations> TypeArgumentsWithAnnotations
         {
-            get { return _typeParameters.Cast<TypeParameterSymbol, TypeSymbol>(); }
+            get { return GetTypeParametersAsTypeArguments(); }
         }
 
         public override ImmutableArray<TypeParameterSymbol> TypeParameters
@@ -209,8 +212,18 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
 
         internal override ObsoleteAttributeData ObsoleteAttributeData
         {
-            get { throw ExceptionUtilities.Unreachable; }
+            get { throw ExceptionUtilities.Unreachable(); }
         }
+
+        internal sealed override UnmanagedCallersOnlyAttributeData GetUnmanagedCallersOnlyAttributeData(bool forceComplete) => throw ExceptionUtilities.Unreachable();
+
+        internal sealed override bool HasSpecialNameAttribute => throw ExceptionUtilities.Unreachable();
+
+        internal override bool HasUnscopedRefAttribute => false;
+
+        internal override bool UseUpdatedEscapeRules => false;
+
+        internal override CallerUnsafeMode GetCallerUnsafeMode(ConsList<FieldSymbol> fieldsBeingBound) => CallerUnsafeMode.None;
 
         internal override bool RequiresSecurityObject
         {
@@ -227,14 +240,19 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             return null;
         }
 
+        public override bool AreLocalsZeroed
+        {
+            get { throw ExceptionUtilities.Unreachable(); }
+        }
+
         internal override ImmutableArray<string> GetAppliedConditionalSymbols()
         {
-            throw ExceptionUtilities.Unreachable;
+            throw ExceptionUtilities.Unreachable();
         }
 
         internal override IEnumerable<Cci.SecurityAttribute> GetSecurityInformation()
         {
-            throw ExceptionUtilities.Unreachable;
+            throw ExceptionUtilities.Unreachable();
         }
 
         internal override bool IsMetadataFinal
@@ -245,19 +263,72 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             }
         }
 
-        internal override bool IsMetadataNewSlot(bool ignoreInterfaceImplementationChanges = false)
+        internal override bool IsMetadataNewSlot(ModuleSymbol context, bool ignoreInterfaceImplementationChanges = false)
         {
             return false;
         }
 
-        internal override bool IsMetadataVirtual(bool ignoreInterfaceImplementationChanges = false)
+        internal override bool IsMetadataVirtual(ModuleSymbol context, bool ignoreInterfaceImplementationChanges = false)
         {
             return false;
         }
 
         internal override int CalculateLocalSyntaxOffset(int localPosition, SyntaxTree localTree)
         {
-            throw ExceptionUtilities.Unreachable;
+            throw ExceptionUtilities.Unreachable();
+        }
+
+        internal override bool IsNullableAnalysisEnabled() => false;
+
+        protected override bool HasSetsRequiredMembersImpl => throw ExceptionUtilities.Unreachable();
+
+        internal override ThreeState RuntimeAsyncMethodGenerationAttributeSetting => throw ExceptionUtilities.Unreachable();
+
+        internal sealed override bool HasAsyncMethodBuilderAttribute(out TypeSymbol builderArgument)
+        {
+            builderArgument = null;
+            return false;
+        }
+
+        internal override int TryGetOverloadResolutionPriority() => 0;
+
+#if DEBUG
+        protected override MethodSymbolAdapter CreateCciAdapter()
+        {
+            return new PlaceholderMethodSymbolAdapter(this);
+        }
+#endif
+    }
+
+#if DEBUG
+    internal sealed partial class PlaceholderMethodSymbolAdapter : MethodSymbolAdapter
+    {
+        internal PlaceholderMethodSymbolAdapter(MethodSymbol underlyingMethodSymbol) : base(underlyingMethodSymbol)
+        { }
+    }
+#endif
+
+#if DEBUG
+    internal partial class PlaceholderMethodSymbolAdapter :
+#else
+    internal partial class PlaceholderMethodSymbol :
+#endif
+        Cci.ISignature
+    {
+        bool Cci.ISignature.ReturnValueIsByRef
+        {
+            get { return true; }
+        }
+
+        // This should be inherited from the base class implementation, but it does not currently work with Nullable
+        // Reference Types.
+        // https://github.com/dotnet/roslyn/issues/39167
+        ImmutableArray<Cci.ICustomModifier> Cci.ISignature.RefCustomModifiers
+        {
+            get
+            {
+                return ImmutableArray<Cci.ICustomModifier>.CastUp(AdaptedMethodSymbol.RefCustomModifiers);
+            }
         }
     }
 }

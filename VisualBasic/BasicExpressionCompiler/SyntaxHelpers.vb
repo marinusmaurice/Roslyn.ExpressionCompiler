@@ -1,4 +1,6 @@
-﻿' Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿' Licensed to the .NET Foundation under one or more agreements.
+' The .NET Foundation licenses this file to you under the MIT license.
+' See the LICENSE file in the project root for more information.
 
 Imports System.Collections.ObjectModel
 Imports System.Runtime.CompilerServices
@@ -10,6 +12,8 @@ Imports Microsoft.CodeAnalysis.VisualBasic.Syntax
 
 Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
     Friend Module SyntaxHelpers
+        Friend ReadOnly ParseOptions As VisualBasicParseOptions = VisualBasicParseOptions.Default.WithLanguageVersion(LanguageVersionFacts.CurrentVersion)
+
         ''' <summary>
         ''' Parse expression. Returns null if there are any errors.
         ''' </summary>
@@ -30,12 +34,12 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
 
         <Extension>
         Friend Function ParseAssignment(target As String, expr As String, diagnostics As DiagnosticBag) As AssignmentStatementSyntax
-            Dim text = SourceText.From(expr)
+            Dim text = SourceText.From(expr, encoding:=Nothing, SourceHashAlgorithms.Default)
             Dim expression = SyntaxHelpers.ParseDebuggerExpressionInternal(text, consumeFullText:=True)
             ' We're creating a SyntaxTree for just the RHS so that the Diagnostic spans for parse errors
             ' will be correct (with respect to the original input text).  If we ever expose a SemanticModel
             ' for debugger expressions, we should use this SyntaxTree.
-            Dim syntaxTree = expression.CreateSyntaxTree()
+            Dim syntaxTree = CreateSyntaxTree(expression, text)
             diagnostics.AddRange(syntaxTree.GetDiagnostics())
 
             If diagnostics.HasAnyErrors Then
@@ -44,7 +48,8 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
 
             ' Any Diagnostic spans produced in binding will be offset by the length of the "target" expression text.
             ' If we want to support live squiggles in debugger windows, SemanticModel, etc, we'll want to address this.
-            Dim targetSyntax = SyntaxHelpers.ParseDebuggerExpressionInternal(SourceText.From(target), consumeFullText:=True)
+            Dim targetText = SourceText.From(target, encoding:=Nothing, SourceHashAlgorithms.Default)
+            Dim targetSyntax = SyntaxHelpers.ParseDebuggerExpressionInternal(targetText, consumeFullText:=True)
             Debug.Assert(Not targetSyntax.GetDiagnostics().Any(), "The target of an assignment should never contain Diagnostics if we're being allowed to assign to it in the debugger.")
 
             Dim assignment = InternalSyntax.SyntaxFactory.SimpleAssignmentStatement(
@@ -52,7 +57,8 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
                 New InternalSyntax.PunctuationSyntax(SyntaxKind.EqualsToken, "=", Nothing, Nothing),
                 expression)
 
-            syntaxTree = assignment.MakeDebuggerStatementContext().CreateSyntaxTree()
+            Dim assignmentText = SourceText.From(assignment.ToString(), encoding:=Nothing, SourceHashAlgorithms.Default)
+            syntaxTree = CreateSyntaxTree(assignment.MakeDebuggerStatementContext(), assignmentText)
             Return DirectCast(syntaxTree.GetDebuggerStatement(), AssignmentStatementSyntax)
         End Function
 
@@ -138,21 +144,22 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
         ''' <summary>
         ''' Parse a debugger expression (e.g. possibly including pseudo-variables).
         ''' </summary>
-        ''' <param name="text">The input string</param>
+        ''' <param name="source">The input string</param>
         ''' <remarks>
         ''' It would be better if this method returned ExpressionStatementSyntax, but this is the best we can do for
         ''' the time being due to issues in the binder resolving ambiguities between invocations and array access.
         ''' </remarks>
-        Friend Function ParseDebuggerExpression(text As String, consumeFullText As Boolean) As PrintStatementSyntax
-            Dim expression = ParseDebuggerExpressionInternal(SourceText.From(text), consumeFullText)
+        Friend Function ParseDebuggerExpression(source As String, consumeFullText As Boolean) As PrintStatementSyntax
+            Dim text = SourceText.From(source, encoding:=Nothing, SourceHashAlgorithms.Default)
+            Dim expression = ParseDebuggerExpressionInternal(text, consumeFullText)
             Dim statement = InternalSyntax.SyntaxFactory.PrintStatement(
                 New InternalSyntax.PunctuationSyntax(SyntaxKind.QuestionToken, "?", Nothing, Nothing), expression)
-            Dim syntaxTree = statement.MakeDebuggerStatementContext().CreateSyntaxTree()
+            Dim syntaxTree = CreateSyntaxTree(statement.MakeDebuggerStatementContext(), text)
             Return DirectCast(syntaxTree.GetDebuggerStatement(), PrintStatementSyntax)
         End Function
 
         Private Function ParseDebuggerExpressionInternal(source As SourceText, consumeFullText As Boolean) As InternalSyntax.ExpressionSyntax
-            Using scanner As New InternalSyntax.Scanner(source, VisualBasicParseOptions.Default, isScanningForExpressionCompiler:=True) ' NOTE: Default options should be enough
+            Using scanner As New InternalSyntax.Scanner(source, ParseOptions, isScanningForExpressionCompiler:=True) ' NOTE: Default options should be enough
                 Using p = New InternalSyntax.Parser(scanner)
                     p.GetNextToken()
                     Dim node = p.ParseExpression()
@@ -162,21 +169,21 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             End Using
         End Function
 
-        Private Function ParseDebuggerStatement(text As String) As StatementSyntax
-            Using scanner As New InternalSyntax.Scanner(SourceText.From(text), VisualBasicParseOptions.Default, isScanningForExpressionCompiler:=True) ' NOTE: Default options should be enough
+        Private Function ParseDebuggerStatement(source As String) As StatementSyntax
+            Dim text = SourceText.From(source, encoding:=Nothing, SourceHashAlgorithms.Default)
+            Using scanner As New InternalSyntax.Scanner(text, ParseOptions, isScanningForExpressionCompiler:=True) ' NOTE: Default options should be enough
                 Using p = New InternalSyntax.Parser(scanner)
                     p.GetNextToken()
                     Dim node = p.ParseStatementInMethodBody()
                     node = p.ConsumeUnexpectedTokens(node)
-                    Dim syntaxTree = node.MakeDebuggerStatementContext().CreateSyntaxTree()
+                    Dim syntaxTree = CreateSyntaxTree(node.MakeDebuggerStatementContext(), text)
                     Return syntaxTree.GetDebuggerStatement()
                 End Using
             End Using
         End Function
 
-        <Extension>
-        Private Function CreateSyntaxTree(root As InternalSyntax.VisualBasicSyntaxNode) As SyntaxTree
-            Return VisualBasicSyntaxTree.Create(DirectCast(root.CreateRed(Nothing, 0), VisualBasicSyntaxNode))
+        Private Function CreateSyntaxTree(root As InternalSyntax.VisualBasicSyntaxNode, text As SourceText) As SyntaxTree
+            Return VisualBasicSyntaxTree.CreateForDebugger(DirectCast(root.CreateRed(Nothing, 0), VisualBasicSyntaxNode), text, ParseOptions)
         End Function
 
         <Extension>

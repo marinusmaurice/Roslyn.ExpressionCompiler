@@ -1,6 +1,7 @@
-﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for more information.
 
-using System;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Reflection.Metadata;
@@ -32,12 +33,24 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             AddMemberOptions(SymbolDisplayMemberOptions.IncludeParameters).
             WithParameterOptions(SymbolDisplayParameterOptions.IncludeType);
 
+        private static readonly SymbolDisplayFormat s_indexerCompactNameFormat = CompactNameFormat.
+            WithMemberOptions(SymbolDisplayMemberOptions.IncludeParameters).
+            WithParameterOptions(SymbolDisplayParameterOptions.None);
+
+        internal override string GetCompactName(MethodSymbol method)
+        {
+            var symbol = method.AssociatedSymbol ?? method;
+            var format = symbol is PropertySymbol { IsIndexer: true } ?
+                s_indexerCompactNameFormat :
+                CompactNameFormat;
+            return symbol.ToDisplayString(format);
+        }
+
         internal override void AppendFullName(StringBuilder builder, MethodSymbol method)
         {
-            var displayFormat =
-                ((method.MethodKind == MethodKind.PropertyGet) || (method.MethodKind == MethodKind.PropertySet)) ?
-                    s_propertyDisplayFormat :
-                    DisplayFormat;
+            var displayFormat = method.MethodKind is MethodKind.PropertyGet or MethodKind.PropertySet
+                ? s_propertyDisplayFormat
+                : DisplayFormat;
 
             var parts = method.ToDisplayParts(displayFormat);
             var numParts = parts.Length;
@@ -49,7 +62,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 switch (part.Kind)
                 {
                     case SymbolDisplayPartKind.ClassName:
-                        if (GeneratedNames.GetKind(displayString) != GeneratedNameKind.LambdaDisplayClass)
+                        if (GeneratedNameParser.GetKind(displayString) != GeneratedNameKind.LambdaDisplayClass)
                         {
                             builder.Append(displayString);
                         }
@@ -60,14 +73,15 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                             {
                                 i++;
                             }
-                            while ((i < numParts) && parts[i].Kind != SymbolDisplayPartKind.MethodName);
+                            while (i < numParts && parts[i].Kind != SymbolDisplayPartKind.MethodName);
                             i--;
                         }
                         break;
+
                     case SymbolDisplayPartKind.MethodName:
                         GeneratedNameKind kind;
                         int openBracketOffset, closeBracketOffset;
-                        if (GeneratedNames.TryParseGeneratedName(displayString, out kind, out openBracketOffset, out closeBracketOffset) &&
+                        if (GeneratedNameParser.TryParseGeneratedName(displayString, out kind, out openBracketOffset, out closeBracketOffset) &&
                             (kind == GeneratedNameKind.LambdaMethod || kind == GeneratedNameKind.LocalFunction))
                         {
                             builder.Append(displayString, openBracketOffset + 1, closeBracketOffset - openBracketOffset - 1); // source method name
@@ -87,6 +101,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                             builder.Append(displayString);
                         }
                         break;
+
                     default:
                         builder.Append(displayString);
                         break;
@@ -117,7 +132,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             var methodArgumentStartIndex = typeParameters.Length - methodArity;
             var typeMap = new TypeMap(
                 ImmutableArray.Create(typeParameters, 0, methodArgumentStartIndex),
-                ImmutableArray.CreateRange(typeArguments, 0, methodArgumentStartIndex, TypeMap.TypeSymbolAsTypeWithModifiers));
+                ImmutableArray.CreateRange(typeArguments, 0, methodArgumentStartIndex, t => TypeWithAnnotations.Create(t)));
             var substitutedType = typeMap.SubstituteNamedType(method.ContainingType);
             method = method.AsMember(substitutedType);
             if (methodArity > 0)
@@ -135,12 +150,12 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         internal override CSharpCompilation GetCompilation(DkmClrModuleInstance moduleInstance)
         {
             var appDomain = moduleInstance.AppDomain;
-            var moduleVersionId = moduleInstance.Mvid;
+            var moduleId = moduleInstance.GetModuleId();
             var previous = appDomain.GetMetadataContext<CSharpMetadataContext>();
             var metadataBlocks = moduleInstance.RuntimeInstance.GetMetadataBlocks(appDomain, previous.MetadataBlocks);
 
             var kind = GetMakeAssemblyReferencesKind();
-            var contextId = MetadataContextId.GetContextId(moduleVersionId, kind);
+            var contextId = MetadataContextId.GetContextId(moduleId, kind);
             var assemblyContexts = previous.Matches(metadataBlocks) ? previous.AssemblyContexts : ImmutableDictionary<MetadataContextId, CSharpMetadataContext>.Empty;
             CSharpMetadataContext previousContext;
             assemblyContexts.TryGetValue(contextId, out previousContext);
@@ -148,7 +163,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             var compilation = previousContext.Compilation;
             if (compilation == null)
             {
-                compilation = metadataBlocks.ToCompilation(moduleVersionId, kind);
+                compilation = metadataBlocks.ToCompilation(moduleId, kind);
                 appDomain.SetMetadataContext(
                     new MetadataContext<CSharpMetadataContext>(
                         metadataBlocks,
@@ -162,7 +177,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         internal override MethodSymbol GetMethod(CSharpCompilation compilation, DkmClrInstructionAddress instructionAddress)
         {
             var methodHandle = (MethodDefinitionHandle)MetadataTokens.Handle(instructionAddress.MethodId.Token);
-            return compilation.GetSourceMethod(instructionAddress.ModuleInstance.Mvid, methodHandle);
+            return compilation.GetSourceMethod(instructionAddress.ModuleInstance.GetModuleId(), methodHandle);
         }
 
         internal override TypeNameDecoder<PEModuleSymbol, TypeSymbol> GetTypeNameDecoder(CSharpCompilation compilation, MethodSymbol method)

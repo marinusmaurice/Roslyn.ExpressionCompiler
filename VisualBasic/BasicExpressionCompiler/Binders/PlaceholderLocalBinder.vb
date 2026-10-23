@@ -1,11 +1,12 @@
-﻿' Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿' Licensed to the .NET Foundation under one or more agreements.
+' The .NET Foundation licenses this file to you under the MIT license.
+' See the LICENSE file in the project root for more information.
 
 Imports System.Collections.Immutable
 Imports System.Runtime.InteropServices
 Imports Microsoft.CodeAnalysis.ExpressionEvaluator
 Imports Microsoft.CodeAnalysis.VisualBasic.Symbols
 Imports Microsoft.CodeAnalysis.VisualBasic.Syntax
-Imports Roslyn.Utilities
 
 Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
 
@@ -43,7 +44,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             arity As Integer,
             options As LookupOptions,
             originalBinder As Binder,
-            <[In]> <Out> ByRef useSiteDiagnostics As HashSet(Of DiagnosticInfo))
+            <[In]> <Out> ByRef useSiteInfo As CompoundUseSiteInfo(Of AssemblySymbol))
 
             If (options And (LookupOptions.NamespacesOrTypesOnly Or LookupOptions.LabelsOnly Or LookupOptions.MustNotBeLocalOrParameter)) <> 0 Then
                 Return
@@ -51,7 +52,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
 
             Dim local As LocalSymbol = Nothing
             If _implicitDeclarations.TryGetValue(name, local) Then
-                result.SetFrom(CheckViability(local, arity, options, Nothing, useSiteDiagnostics))
+                result.SetFrom(CheckViability(local, arity, options, Nothing, useSiteInfo))
             End If
         End Sub
 
@@ -61,7 +62,7 @@ Namespace Microsoft.CodeAnalysis.VisualBasic.ExpressionEvaluator
             End Get
         End Property
 
-        Public Overrides Function DeclareImplicitLocalVariable(nameSyntax As IdentifierNameSyntax, diagnostics As DiagnosticBag) As LocalSymbol
+        Public Overrides Function DeclareImplicitLocalVariable(nameSyntax As IdentifierNameSyntax, diagnostics As BindingDiagnosticBag) As LocalSymbol
             Debug.Assert(_allowImplicitDeclarations)
             Debug.Assert(_implicitDeclarations IsNot Nothing)
 

@@ -1,7 +1,7 @@
-﻿// Copyright (c) Microsoft.  All Rights Reserved.  Licensed under the Apache License, Version 2.0.  See License.txt in the project root for license information.
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+// See the LICENSE file in the project root for more information.
 
-using System;
-using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -22,43 +22,36 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             return (PENamedTypeSymbol)metadataDecoder.GetTypeOfToken(typeHandle);
         }
 
-        internal static PENamedTypeSymbol GetType(this CSharpCompilation compilation, Guid moduleVersionId, int typeToken)
+        /// <exception cref="BadMetadataModuleException">Module wasn't included in the compilation due to bad metadata.</exception>
+        internal static PENamedTypeSymbol GetType(this CSharpCompilation compilation, ModuleId moduleId, int typeToken)
         {
-            return GetType(compilation.GetModule(moduleVersionId), (TypeDefinitionHandle)MetadataTokens.Handle(typeToken));
+            return GetType(compilation.GetModule(moduleId), (TypeDefinitionHandle)MetadataTokens.Handle(typeToken));
         }
 
-        internal static PEMethodSymbol GetSourceMethod(this CSharpCompilation compilation, Guid moduleVersionId, MethodDefinitionHandle methodHandle)
+        internal static PEMethodSymbol GetSourceMethod(this CSharpCompilation compilation, ModuleId moduleId, MethodDefinitionHandle methodHandle)
         {
-            var method = GetMethod(compilation, moduleVersionId, methodHandle);
+            var method = GetMethod(compilation, moduleId, methodHandle);
             var metadataDecoder = new MetadataDecoder((PEModuleSymbol)method.ContainingModule);
             var containingType = method.ContainingType;
-            string sourceMethodName;
-            if (GeneratedNames.TryParseSourceMethodNameFromGeneratedName(containingType.Name, GeneratedNameKind.StateMachineType, out sourceMethodName))
+            if (GeneratedNameParser.TryParseSourceMethodNameFromGeneratedName(containingType.Name, GeneratedNameKind.StateMachineType, out var sourceMethodName))
             {
                 foreach (var member in containingType.ContainingType.GetMembers(sourceMethodName))
                 {
-                    if (member is PEMethodSymbol candidateMethod)
+                    if (member is PEMethodSymbol candidateMethod &&
+                        metadataDecoder.Module.HasStateMachineAttribute(candidateMethod.Handle, out var stateMachineTypeName) &&
+                        metadataDecoder.GetTypeSymbolForSerializedType(stateMachineTypeName).OriginalDefinition.Equals(containingType))
                     {
-                        var module = metadataDecoder.Module;
-                        methodHandle = candidateMethod.Handle;
-                        string stateMachineTypeName;
-                        if (module.HasStringValuedAttribute(methodHandle, AttributeDescription.AsyncStateMachineAttribute, out stateMachineTypeName) ||
-                            module.HasStringValuedAttribute(methodHandle, AttributeDescription.IteratorStateMachineAttribute, out stateMachineTypeName))
-                        {
-                            if (metadataDecoder.GetTypeSymbolForSerializedType(stateMachineTypeName).OriginalDefinition.Equals(containingType))
-                            {
-                                return candidateMethod;
-                            }
-                        }
+                        return candidateMethod;
                     }
                 }
             }
             return method;
         }
 
-        internal static PEMethodSymbol GetMethod(this CSharpCompilation compilation, Guid moduleVersionId, MethodDefinitionHandle methodHandle)
+        /// <exception cref="BadMetadataModuleException">Module wasn't included in the compilation due to bad metadata.</exception>
+        internal static PEMethodSymbol GetMethod(this CSharpCompilation compilation, ModuleId moduleId, MethodDefinitionHandle methodHandle)
         {
-            var module = compilation.GetModule(moduleVersionId);
+            var module = compilation.GetModule(moduleId);
             var reader = module.Module.MetadataReader;
             var typeHandle = reader.GetMethodDefinition(methodHandle).GetDeclaringType();
             var type = GetType(module, typeHandle);
@@ -66,7 +59,8 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
             return method;
         }
 
-        internal static PEModuleSymbol GetModule(this CSharpCompilation compilation, Guid moduleVersionId)
+        /// <exception cref="BadMetadataModuleException">Module wasn't included in the compilation due to bad metadata.</exception>
+        internal static PEModuleSymbol GetModule(this CSharpCompilation compilation, ModuleId moduleId)
         {
             foreach (var pair in compilation.GetBoundReferenceManager().GetReferencedAssemblies())
             {
@@ -75,24 +69,24 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 {
                     var m = (PEModuleSymbol)module;
                     var id = m.Module.GetModuleVersionIdOrThrow();
-                    if (id == moduleVersionId)
+                    if (id == moduleId.Id)
                     {
                         return m;
                     }
                 }
             }
 
-            throw new ArgumentException($"No module found with MVID '{moduleVersionId}'", nameof(moduleVersionId));
+            throw new BadMetadataModuleException(moduleId);
         }
 
-        internal static CSharpCompilation ToCompilationReferencedModulesOnly(this ImmutableArray<MetadataBlock> metadataBlocks, Guid moduleVersionId)
+        internal static CSharpCompilation ToCompilationReferencedModulesOnly(this ImmutableArray<MetadataBlock> metadataBlocks, ModuleId moduleId)
         {
-            return ToCompilation(metadataBlocks, moduleVersionId, kind: MakeAssemblyReferencesKind.DirectReferencesOnly);
+            return ToCompilation(metadataBlocks, moduleId, kind: MakeAssemblyReferencesKind.DirectReferencesOnly);
         }
 
-        internal static CSharpCompilation ToCompilation(this ImmutableArray<MetadataBlock> metadataBlocks, Guid moduleVersionId, MakeAssemblyReferencesKind kind)
+        internal static CSharpCompilation ToCompilation(this ImmutableArray<MetadataBlock> metadataBlocks, ModuleId moduleId, MakeAssemblyReferencesKind kind)
         {
-            var references = metadataBlocks.MakeAssemblyReferences(moduleVersionId, IdentityComparer, kind, out var referencesBySimpleName);
+            var references = metadataBlocks.MakeAssemblyReferences(moduleId, IdentityComparer, kind, out var referencesBySimpleName);
             var options = s_compilationOptions;
             if (referencesBySimpleName != null)
             {
@@ -106,7 +100,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 options: options);
         }
 
-        internal static ReadOnlyCollection<byte> GetCustomTypeInfoPayload(
+        internal static ReadOnlyCollection<byte>? GetCustomTypeInfoPayload(
             this CSharpCompilation compilation,
             TypeSymbol type,
             int customModifiersCount,
@@ -117,7 +111,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 GetTupleElementNames(compilation, type));
         }
 
-        private static ReadOnlyCollection<byte> GetDynamicTransforms(
+        private static ReadOnlyCollection<byte>? GetDynamicTransforms(
             this CSharpCompilation compilation,
             TypeSymbol type,
             int customModifiersCount,
@@ -125,21 +119,21 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
         {
             var builder = ArrayBuilder<bool>.GetInstance();
             CSharpCompilation.DynamicTransformsEncoder.Encode(type, customModifiersCount, refKind, builder, addCustomModifierFlags: true);
-            var bytes = builder.Count > 0 && compilation.HasDynamicEmitAttributes() ?
-                DynamicFlagsCustomTypeInfo.ToBytes(builder) :
-                null;
+            var bytes = builder.Count > 0 && compilation.HasDynamicEmitAttributes(BindingDiagnosticBag.Discarded, Location.None)
+                ? DynamicFlagsCustomTypeInfo.ToBytes(builder)
+                : null;
             builder.Free();
             return bytes;
         }
 
-        private static ReadOnlyCollection<string> GetTupleElementNames(
+        private static ReadOnlyCollection<string?>? GetTupleElementNames(
             this CSharpCompilation compilation,
             TypeSymbol type)
         {
-            var builder = ArrayBuilder<string>.GetInstance();
-            var names = CSharpCompilation.TupleNamesEncoder.TryGetNames(type, builder) && compilation.HasTupleNamesAttributes ?
-                new ReadOnlyCollection<string>(builder.ToArray()) :
-                null;
+            var builder = ArrayBuilder<string?>.GetInstance();
+            var names = CSharpCompilation.TupleNamesEncoder.TryGetNames(type, builder) && compilation.HasTupleNamesAttributes(BindingDiagnosticBag.Discarded, Location.None)
+                ? new ReadOnlyCollection<string?>(builder.ToArray())
+                : null;
             builder.Free();
             return names;
         }
@@ -160,7 +154,7 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 BinderFlags.IgnoreAccessibility |
                 BinderFlags.UnsafeRegion |
                 BinderFlags.UncheckedRegion |
-                BinderFlags.AllowManagedAddressOf |
+                BinderFlags.AllowMoveableAddressOf |
                 BinderFlags.AllowAwaitInUnsafeContext |
                 BinderFlags.IgnoreCorLibraryDuplicatedTypes);
     }
