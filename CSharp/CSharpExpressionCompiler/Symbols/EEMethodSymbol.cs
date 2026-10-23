@@ -515,6 +515,17 @@ namespace Microsoft.CodeAnalysis.CSharp.ExpressionEvaluator
                 return;
             }
 
+            // dnSpy: pattern variables (eg. `x is int y`) aren't rewritten to EE variables and crash code gen
+            // (https://github.com/dotnet/roslyn/issues/25702, the Roslyn test is skipped). Report an error instead.
+            foreach (var local in declaredLocalsArray)
+            {
+                if (local.DeclarationKind == LocalDeclarationKind.PatternVariable)
+                {
+                    diagnostics.Add(ErrorCode.ERR_DeclarationExpressionNotPermitted, local.GetFirstLocation());
+                    return;
+                }
+            }
+
             try
             {
                 var declaredLocals = PooledHashSet<LocalSymbol>.GetInstance();
